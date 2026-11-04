@@ -1,0 +1,14 @@
+/dist/
+/work/
+/outputs/
+settings.xml
+settings.xml.tmp
+window-position.txt
+ui-error.txt
+*.log
+*.user
+*.suo
+.vs/
+.env
+.env.*
+!.env.example

@@ -1,0 +1,26 @@
+name: Windows build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and run hardware-independent self-tests
+        shell: pwsh
+        run: .\scripts\build.ps1 -Test
+      - name: Upload standalone Windows executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: WirelessBatteryPanel-win-x64
+          path: dist/WirelessBatteryPanel.exe
+          if-no-files-found: error
+          retention-days: 30
+
