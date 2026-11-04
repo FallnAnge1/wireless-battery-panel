@@ -14,8 +14,8 @@ using Microsoft.Win32;
 [assembly:System.Reflection.AssemblyTitle("无线设备电量")]
 [assembly:System.Reflection.AssemblyProduct("无线设备电量")]
 [assembly:System.Reflection.AssemblyDescription("键盘、鼠标及蓝牙设备电量总览")]
-[assembly:System.Reflection.AssemblyVersion("2.12.0.0")]
-[assembly:System.Reflection.AssemblyFileVersion("2.12.0.0")]
+[assembly:System.Reflection.AssemblyVersion("2.13.0.0")]
+[assembly:System.Reflection.AssemblyFileVersion("2.13.0.0")]
 
 static class AppStorage {
     public static string Root {
@@ -182,6 +182,7 @@ sealed class DeviceEntry {
     public string ChargeText;
     public int? WindowsChargeState;
     public string ReaderPath;
+    public List<string> StandardPaths=new List<string>();
     public DateTime SampledAt;
     public bool? Connected;
     public int? Percent;
@@ -368,24 +369,43 @@ static class DeviceInventory {
                 string name=null;using(var h=CreateFile(d.Id,0,3,IntPtr.Zero,3,0,IntPtr.Zero)){if(h.IsInvalid)continue;var bytes=new byte[512];if(HidD_GetProductString(h,bytes,bytes.Length))name=System.Text.Encoding.Unicode.GetString(bytes).TrimEnd('\0').Trim();}
                 bool primary=d.Id.IndexOf("vid_3554&pid_fa09",StringComparison.OrdinalIgnoreCase)>=0;
                 bool g3m=d.Id.IndexOf("vid_320f&pid_706e",StringComparison.OrdinalIgnoreCase)>=0||d.Id.IndexOf("vid_320f&pid_706b",StringComparison.OrdinalIgnoreCase)>=0;
+                var standard=primary||g3m?null:StandardHidBattery.Describe(d.Id);
                 // Previously identified on this PC; some collections return an empty product string.
                 if(String.IsNullOrEmpty(name)&&d.Id.IndexOf("vid_1d57&pid_130f",StringComparison.OrdinalIgnoreCase)>=0)name="2.4G 无线鼠标";
                 if(String.IsNullOrEmpty(name)&&primary)name="2.4G Wireless Receiver";
                 if(String.IsNullOrEmpty(name)&&g3m)name="G3M PRO";
+                if(String.IsNullOrEmpty(name)&&standard!=null)name=String.IsNullOrWhiteSpace(d.Name)?"HID 电量设备":d.Name;
                 if(String.IsNullOrEmpty(name))continue;
                 string lower=name.ToLowerInvariant();
                 bool wireless=primary||g3m||lower.Contains("wireless")||lower.Contains("receiver")||lower.Contains("dongle")||lower.Contains("2.4")||lower.Contains("lightspeed")||lower.Contains("unifying")||lower.Contains("无线")||lower.Contains("接收器");
+                if(!wireless&&standard!=null){if(lower.Contains("wired")||lower.Contains("有线"))continue;wireless=true;}
                 if(!wireless)continue;
                 string id=primary?"hi98":Identity(d,"System.Devices.ContainerId","usb:");
                 string readerPath=g3m&&Receiver.IsG3mInterface(d.Id)?d.Id:null;
-                DeviceEntry prior;if(entries.TryGetValue(id,out prior)){if(readerPath!=null)prior.ReaderPath=readerPath;if(!primary||prior.Connected==true)continue;}
-                entries[id]=new DeviceEntry {Id=id,IsG3m=g3m,WindowsChargeState=ChargeStatus.WindowsValue(Property(d,ChargeKey)),ChargeText=ChargeStatus.WindowsText(ChargeStatus.WindowsValue(Property(d,ChargeKey))),Name=primary?"HI98 Pro":name,Transport=g3m?(d.Id.IndexOf("pid_706b",StringComparison.OrdinalIgnoreCase)>=0?"USB 有线":"2.4G"):primary||lower.Contains("2.4")?"2.4G":"USB 无线接收器",Connected=null,Note=primary||g3m?"已适配电量读取":"接收器已插入 · 电量暂不支持",ReaderPath=readerPath};
+                DeviceEntry prior;if(entries.TryGetValue(id,out prior)){if(readerPath!=null)prior.ReaderPath=readerPath;if(standard!=null&&!prior.StandardPaths.Exists(p=>String.Equals(p,d.Id,StringComparison.OrdinalIgnoreCase)))prior.StandardPaths.Add(d.Id);if(!primary||prior.Connected==true)continue;}
+                var added=new DeviceEntry {Id=id,IsG3m=g3m,WindowsChargeState=ChargeStatus.WindowsValue(Property(d,ChargeKey)),ChargeText=ChargeStatus.WindowsText(ChargeStatus.WindowsValue(Property(d,ChargeKey))),Name=primary?"HI98 Pro":name,Transport=g3m?(d.Id.IndexOf("pid_706b",StringComparison.OrdinalIgnoreCase)>=0?"USB 有线":"2.4G"):primary||lower.Contains("2.4")?"2.4G":standard!=null?"USB HID":"USB 无线接收器",Connected=null,Note=primary||g3m?"已适配电量读取":standard!=null?"已声明标准 HID 电量，等待查询":"接收器已插入 · 电量暂不支持",ReaderPath=readerPath};
+                if(standard!=null)added.StandardPaths.Add(d.Id);entries[id]=added;
             }
             result.UsbOk=true;
         }catch {result.Warning+=(result.Warning.Length>0?"；":"")+"USB 接收器扫描暂不可用";}
         try {
             KnownReceivers.Scan(entries);
         }catch {result.UsbOk=false;result.Warning+=(result.Warning.Length>0?"；":"")+"USB 接收器补充扫描暂不可用";}
+        try {
+            foreach(var path in Receiver.EnumeratePaths()){
+                if(path.IndexOf("vid_3554&pid_fa09",StringComparison.OrdinalIgnoreCase)>=0||path.IndexOf("vid_320f&pid_706e",StringComparison.OrdinalIgnoreCase)>=0||path.IndexOf("vid_320f&pid_706b",StringComparison.OrdinalIgnoreCase)>=0)continue;
+                var descriptor=StandardHidBattery.Describe(path);if(descriptor==null)continue;
+                var parts=path.Split('#');if(parts.Length<3)continue;
+                string root=KnownReceivers.UsbRoot("HID\\"+parts[1]+"\\"+parts[2]);if(root==null)continue;
+                string id="usb:"+root;DeviceEntry entry;
+                if(!entries.TryGetValue(id,out entry)){
+                    string name=String.IsNullOrWhiteSpace(descriptor.Name)?"HID 电量设备":descriptor.Name;
+                    if((name.IndexOf("wired",StringComparison.OrdinalIgnoreCase)>=0&&name.IndexOf("wireless",StringComparison.OrdinalIgnoreCase)<0)||(name.Contains("有线")&&!name.Contains("无线")))continue;
+                    entries[id]=entry=new DeviceEntry {Id=id,Name=name,Transport="USB HID",Note="已声明标准 HID 电量，等待查询"};
+                }
+                if(!entry.StandardPaths.Exists(p=>String.Equals(p,path,StringComparison.OrdinalIgnoreCase)))entry.StandardPaths.Add(path);
+            }
+        }catch {result.Warning+=(result.Warning.Length>0?"；":"")+"标准 HID 补充扫描暂不可用";}
         if(!entries.ContainsKey("hi98"))entries["hi98"]=new DeviceEntry {Id="hi98",Name="HI98 Pro",Transport="2.4G",Connected=false,Note="未检测到接收器"};
         result.Devices.AddRange(entries.Values);result.Devices.Sort((a,b)=>a.Id==b.Id?0:a.Id=="hi98"?-1:b.Id=="hi98"?1:String.Compare(a.Name,b.Name,StringComparison.CurrentCulture));cached=result;return result;
     }
@@ -394,6 +414,7 @@ static class DeviceInventory {
         var discovered=Get(force);var inventory=new InventorySnapshot {Scanned=discovered.Scanned,BluetoothOk=discovered.BluetoothOk,UsbOk=discovered.UsbOk,Warning=discovered.Warning};
         foreach(var original in discovered.Devices) {
             var d=new DeviceEntry {Id=original.Id,IsG3m=original.IsG3m,ChargeText=original.ChargeText,WindowsChargeState=original.WindowsChargeState,ContainerId=original.ContainerId,BatterySource=original.BatterySource,Name=original.Name,Transport=original.Transport,Note=original.Note,Connected=original.Connected,Percent=original.Percent,ReaderPath=original.ReaderPath};
+            d.StandardPaths.AddRange(original.StandardPaths);
             if(d.ReaderPath!=null) {
                 MouseSample sample;if(!mouseSamples.TryGetValue(d.Id,out sample))mouseSamples[d.Id]=sample=new MouseSample();
                 if(force||DateTime.UtcNow>=sample.Next) {
@@ -403,6 +424,10 @@ static class DeviceInventory {
                 d.Percent=sample.Value==null?(int?)null:sample.Value.Percent;d.SampledAt=sample.Sampled;d.Connected=sample.Value==null?(bool?)null:true;d.Note=sample.Note;
                 d.ChargeText=G3mPresentation.Charge(sample.Value,d.Transport=="USB 有线");
                 LastChargingDiagnostic+=d.Transport+": "+(sample.Value==null?"无响应":sample.Value.Percent+"%, flags="+sample.Value.Flags+", "+(d.ChargeText??"无充电标记"))+"; ";
+            }
+            else if(d.Id!="hi98"&&d.StandardPaths.Count>0){
+                var samples=new List<StandardHidBattery.Sample>();foreach(var path in d.StandardPaths)samples.Add(StandardHidBattery.Read(path,force));
+                var sample=StandardHidBattery.Merge(samples);d.Percent=sample.Percent;d.SampledAt=sample.At;d.Note=sample.Note;d.BatterySource="标准 HID 上报";
             }
             inventory.Devices.Add(d);
         }
@@ -494,6 +519,16 @@ static class Receiver {
         public ushort Links, InButtons, InValues, InIndices, OutButtons, OutValues, OutIndices, FeatureButtons, FeatureValues, FeatureIndices;
     }
     public sealed class Reading { public int Percent; public byte Flags; public string Raw; }
+    public static List<string> EnumeratePaths() {
+        Guid guid;HidD_GetHidGuid(out guid);var result=new List<string>();IntPtr set=SetupDiGetClassDevs(ref guid,IntPtr.Zero,IntPtr.Zero,0x12);
+        if(set==new IntPtr(-1))throw new IOException("无法枚举 HID 接口");
+        try{for(uint n=0;;n++){
+            var item=new Iface {Size=Marshal.SizeOf(typeof(Iface))};if(!SetupDiEnumDeviceInterfaces(set,IntPtr.Zero,ref guid,n,ref item))break;
+            uint needed;SetupDiGetDeviceInterfaceDetail(set,ref item,IntPtr.Zero,0,out needed,IntPtr.Zero);if(needed<8||needed>65536)continue;
+            IntPtr detail=Marshal.AllocHGlobal((int)needed);
+            try{Marshal.WriteInt32(detail,IntPtr.Size==8?8:6);if(SetupDiGetDeviceInterfaceDetail(set,ref item,detail,needed,out needed,IntPtr.Zero)){string path=Marshal.PtrToStringUni(IntPtr.Add(detail,4));if(path!=null)result.Add(path);}}finally{Marshal.FreeHGlobal(detail);}
+        }}finally{SetupDiDestroyDeviceInfoList(set);}return result;
+    }
     public static bool IsG3mInterface(string path) {
         using(var h=CreateFile(path,0,3,IntPtr.Zero,3,0,IntPtr.Zero)) {
             if(h.IsInvalid)return false;IntPtr pp;if(!HidD_GetPreparsedData(h,out pp))return false;
@@ -865,7 +900,7 @@ sealed class BatteryWindow : Form {
         trayOnly=new ToolStripMenuItem("启动时仅显示托盘"){Checked=prefs.TrayOnly,CheckOnClick=true};trayOnly.CheckedChanged+=(s,e)=>{prefs.TrayOnly=trayOnly.Checked;SavePreferences();};menu.Items.Add(trayOnly);
         startup=new ToolStripMenuItem("开机启动（登录后）"){Checked=StartupEnabled()};
         startup.Click+=(s,e)=>{try {using(var k=Registry.CurrentUser.CreateSubKey(RunKey)){if(StartupEnabled())k.DeleteValue(RunName,false);else k.SetValue(RunName,"\""+Application.ExecutablePath+"\" --tray");}startup.Checked=StartupEnabled();}catch{MessageBox.Show("无法修改开机启动设置。","HI98 Pro");}};menu.Items.Add(startup);
-        menu.Items.Add("查看诊断信息",null,(s,e)=>MessageBox.Show("无线设备电量面板 v2.12\n\n蓝牙：显示 Windows 提供的电量；未提供则显示 --。\nUSB 无线接收器：只有已适配型号可以读取电量。\n2.4G 接收器已插入，不代表外设一定在线。\n\nHI98 Pro 最近原始报文：\n"+ConnectionMonitor.LastRaw,"读取状态"));
+        menu.Items.Add("查看诊断信息",null,(s,e)=>MessageBox.Show("无线设备电量面板 v2.13\n\n蓝牙：显示 Windows 提供的电量；未提供则显示 --。\nUSB 无线接收器：只有已适配型号可以读取电量。\n2.4G 接收器已插入，不代表外设一定在线。\n\nHI98 Pro 最近原始报文：\n"+ConnectionMonitor.LastRaw,"读取状态"));
         if(prefs.TrayDesignVersion<1){if(prefs.TrayStyle==0)prefs.TrayStyle=3;prefs.TrayDesignVersion=1;}
         var trayStyle=new ToolStripMenuItem("托盘显示");string[] styleNames={"大号数字","数字 + 电量条","电池图标","圆角电量牌（推荐）"};
         for(int i=0;i<styleNames.Length;i++){int selected=i;var option=new ToolStripMenuItem(styleNames[i]){Checked=prefs.TrayStyle==i};option.Click+=(s,e)=>{prefs.TrayStyle=selected;foreach(ToolStripMenuItem item in trayStyle.DropDownItems)item.Checked=item==option;SyncDeviceTrays();SavePreferences();};trayStyle.DropDownItems.Add(option);}menu.Items.Add(trayStyle);
@@ -930,6 +965,7 @@ sealed class BatteryWindow : Form {
             return primary;
         }
         if(entry.Transport=="蓝牙")return new ConnectionMonitor.Status {Connection=entry.Connected==true?"蓝牙 · 已连接":entry.Connected==false?"蓝牙 · 未连接":"蓝牙 · 状态未知",Detail=entry.Note,Battery=entry.Connected==true&&entry.Percent.HasValue?new Receiver.Reading {Percent=entry.Percent.Value}:null,Tone=entry.Connected==true?1:0,SampleTime=primary.Inventory.Scanned,DeviceName=entry.Name,Source=entry.BatterySource};
+        if(entry.StandardPaths.Count>0)return new ConnectionMonitor.Status {Connection=entry.Transport+(entry.Percent.HasValue?" · 已读取电量":" · 电量暂不可读取"),Detail=entry.Note,Battery=entry.Percent.HasValue?new Receiver.Reading {Percent=entry.Percent.Value}:null,Tone=entry.Percent.HasValue?1:2,SampleTime=entry.SampledAt,DeviceName=entry.Name,Source="标准 HID 上报"};
         if(entry.ReaderPath!=null)return new ConnectionMonitor.Status {Connection=entry.ChargeViaUsb?"2.4G · 接收器已插入":entry.Transport+(entry.Percent.HasValue?" · 设备已响应":" · 连接未确认"),Detail=entry.Note,Battery=entry.Percent.HasValue?new Receiver.Reading {Percent=entry.Percent.Value}:null,Tone=entry.Percent.HasValue?1:2,SampleTime=entry.SampledAt,DeviceName=entry.Name,Source="设备上报"+(entry.ChargeText==null?"":" · ⚡ "+entry.ChargeText)};
         return new ConnectionMonitor.Status {Connection=entry.Transport+" · 接收器已插入",Detail=entry.Note,Tone=2,DeviceName=entry.Name};
     }
@@ -1002,6 +1038,10 @@ sealed class BatteryWindow : Form {
         prefs.TrayStyle=(prefs.TrayStyle+1)%4;SyncDeviceTrays();
         var cachedIcon=currentIcon;SyncDeviceTrays();if(!Object.ReferenceEquals(cachedIcon,currentIcon))throw new Exception("Unchanged tray artwork recreated");
         inventory.Devices[1].Percent=71;ShowStatus(lastPrimary);if(Object.ReferenceEquals(cachedIcon,currentIcon))throw new Exception("Changed second value did not redraw tray");
+        var standardFixture=new DeviceEntry {Id="fixture:standard",Name="TEST 标准电量设备",Transport="USB HID",Percent=38,Note="TEST 标准 HID 电量"};standardFixture.StandardPaths.Add("fixture-path");inventory.Devices.Add(standardFixture);ShowStatus(lastPrimary);
+        var standardCard=overview.Cards.Find(card=>card.Id=="fixture:standard");
+        if(standardCard==null||standardCard.Status.Battery==null||standardCard.Status.Battery.Percent!=38||standardCard.Status.Source!="标准 HID 上报")throw new Exception("Standard HID reading missing from overview");
+        standardFixture.Percent=null;ShowStatus(lastPrimary);if(overview.Cards.Find(card=>card.Id=="fixture:standard").Status.Battery!=null)throw new Exception("Standard HID failure retained stale percent");
         var savedCards=new List<OverviewItem>(overview.Cards);
         var chargingCards=new List<OverviewItem>{new OverviewItem {Id="fixture:keyboard",Name="TEST 键盘",Status=new ConnectionMonitor.Status {Connection="TEST · 已连接",Battery=new Receiver.Reading {Percent=100},ChargeText="正在充电"}},new OverviewItem {Id="fixture:headset",Name="TEST 耳机",Status=new ConnectionMonitor.Status {Connection="TEST · 蓝牙已连接",Battery=new Receiver.Reading {Percent=73},ChargeText="正在充电"}}};
         overview.SetCards(chargingCards);ApplyAppearance();int chargeTicks=overview.ChargeTicks;await Task.Delay(180);
@@ -1069,6 +1109,11 @@ sealed class BatteryWindow : Form {
 
 static class Program {
     [STAThread] static int Main(string[] args) {
+        if(args.Length>1&&args[0]=="--standard-hid-probe") {
+            DeviceInventory.Get(true);var lines=new List<string>();int fields=0;
+            foreach(var pair in StandardHidBattery.Diagnostics){var parts=pair.Key.Split('#');lines.Add((parts.Length>1?parts[1]:"HID")+" | "+pair.Value);if(pair.Value.IndexOf("batteryFields=0",StringComparison.Ordinal)<0&&pair.Value.IndexOf("batteryFields=",StringComparison.Ordinal)>=0)fields++;}
+            lines.Insert(0,"CollectionsInspected="+StandardHidBattery.Diagnostics.Count+"; StandardBatteryCollections="+fields);File.WriteAllLines(args[1],lines);return 0;
+        }
         if(args.Length>1&&args[0]=="--bluetooth-node-probe") {
             try{var nodes=DeviceInventory.ReadBluetoothNodes();int valid=0;foreach(var node in nodes)if(node.Percent.HasValue&&node.Percent>0&&node.Percent<=100)valid++;File.WriteAllText(args[1],"PresentBluetoothNodes="+nodes.Count+"; ValidBatteryProperties="+valid);return 0;}
             catch(Exception e){File.WriteAllText(args[1],e.GetType().Name+": "+e.Message);return 1;}
@@ -1117,6 +1162,7 @@ static class Program {
             BluetoothSupplement.Verify();
             G3mPresentation.Verify();
             ChargeStatus.Verify();KnownReceivers.Verify();
+            StandardHidBattery.Verify();
             byte[] b={19,74,1,0,2,100,1,0,0,0,0,0,0,0,0,0,0,0,0,197};
             if(Receiver.Parse(b,20).Percent!=100)return 1;
             if(ConnectionMonitor.DisplayPercent(Receiver.Parse(b,20))!="100%"||ConnectionMonitor.DisplayPercent(null)!="--")return 10;

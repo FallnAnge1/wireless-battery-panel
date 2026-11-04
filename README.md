@@ -4,7 +4,7 @@
 
 Windows 10/11 64 位键盘、鼠标与蓝牙设备电量工具。原生 C# / WinForms，单个 EXE，无需安装 Python，也无需安装本项目之外的第三方运行库。
 
-当前版本：**2.12.0**。
+当前版本：**2.13.0**。
 
 ![设备总览](docs/screenshot.png)
 
@@ -17,6 +17,7 @@ Windows 10/11 64 位键盘、鼠标与蓝牙设备电量工具。原生 C# / Win
 - 已识别的充电状态显示闪电呼吸和进度条流光；窗口隐藏时暂停动画。
 - 小刷新按钮、超时恢复、窗口缩放、透明度、位置锁定、可选开机启动。
 - 设备 USB 路径区分、异常容器编号过滤，减少多接口重复和不同设备误合并。
+- 通用标准 HID 电量读取：只解析描述符声明的 Battery Strength / Relative State of Charge 字段，支持 Feature 与控制式 Input 报告读取。
 
 ## 设备支持与验证范围
 
@@ -26,9 +27,12 @@ Windows 10/11 64 位键盘、鼠标与蓝牙设备电量工具。原生 C# / Win
 | G3M PRO / `320F:706E`、`320F:706B` | 电量、充电及充满状态；有线查询合并到原卡片 | 本机实测 |
 | `1D57:130F` 无线接收器 | 自动发现与存在状态，电量显示 `--` | 本机实测发现；电量协议未适配 |
 | 蓝牙设备 | Windows 电量与充电属性；同一容器子节点补充读取 | 逻辑模拟测试；缺少真实蓝牙电量、充电硬件验证 |
+| 声明标准 HID 电量字段的 USB 接收器/设备 | 按描述符解析电量与逻辑范围，不需逐型号添加私有查询 | 本机描述符扫描、模拟解析及异常回归；待更多实际标准电量设备验证 |
 | 其他 2.4G 接收器 | 部分名称/编号识别 | 需要对应型号的电量协议 |
 
 **不是所有无线设备都能读取电量。** “接收器已插入”仅确认 USB 接收器存在，不等于鼠标、键盘或耳机一定在线。未知型号无法确认外设断开时，只能在接收器拔出后计时移除。设备休眠无响应也可能暂时被移除，唤醒后恢复。
+
+标准读取优先使用系统 HID 描述符确认字段，再按声明的 Report ID、长度和逻辑范围发出 GET_REPORT。没有字段、报告不支持、数值无效或多字段冲突时保持未知。不会枚举未知厂商写命令，也不把任意字节或绝对容量猜成百分比；不会用连续 ReadFile 抢占鼠标/键盘的输入流。驱动查询在独立后台进行，每接口最多一个未完成请求、总计最多四个，慢请求不阻塞面板刷新。此功能不是全品牌通用私有协议，也不自动增加所有罗技/雷蛇等型号的支持。
 
 电量均为设备或 Windows 上报，未进行放电曲线校准。HI98 Pro 在本机测试中插线后会立即上报 100%，不能据此判断已经充满；插线标记依据本机插拔前后报文接入，未得到厂商协议确认。G3M PRO 充电状态采用该型号的协议规则。动画仅展示已识别的状态，不模拟剩余电量。
 
@@ -36,7 +40,7 @@ Windows 属性可能缓存，蓝牙属性未提供、断开、无效或冲突时
 
 ## 使用
 
-[直接下载 EXE](https://github.com/FallnAnge1/wireless-battery-panel/raw/refs/heads/main/downloads/WirelessBatteryPanel.exe) · [下载 Windows x64 ZIP](https://github.com/FallnAnge1/wireless-battery-panel/raw/refs/heads/main/downloads/wireless-battery-panel-v2.12.0-win-x64.zip) · [SHA-256 校验值](downloads/SHA256SUMS.txt)
+[直接下载 EXE](https://github.com/FallnAnge1/wireless-battery-panel/raw/refs/heads/main/downloads/WirelessBatteryPanel.exe) · [下载 Windows x64 ZIP](https://github.com/FallnAnge1/wireless-battery-panel/raw/refs/heads/main/downloads/wireless-battery-panel-v2.13.0-win-x64.zip) · [SHA-256 校验值](downloads/SHA256SUMS.txt)
 
 双击 EXE 即可运行。可改名后放到桌面；图标内嵌，无需附带 ICO 或源文件。
 
@@ -71,6 +75,7 @@ GUI 测试会临时创建窗口，并在 EXE 同目录保存测试设置和图�
 
 ```text
 src/Hi98Battery.cs        主程序及内置自检
+src/StandardHidBattery.cs 标准 HID 描述符识别和只读电量提供器
 assets/app.ico           内嵌 Windows 软件图标
 scripts/build.ps1        本地及 CI 构建
 scripts/CreateAppIcon.cs  图标绘制源文件

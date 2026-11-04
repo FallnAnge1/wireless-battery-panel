@@ -1,5 +1,15 @@
 # 读取协议与证据边界
 
+## 通用标准 HID（2.13.0）
+
+- Generic Device Controls Page `0x06` / Battery Strength `0x20`：按描述符逻辑最小/最大值归一化为百分比。
+- Battery System Page `0x85` / Relative State of Charge `0x64`：仅接受描述符声明的 0–100 百分比范围。不把 Remaining Capacity 等绝对容量字段当百分比。
+- 由 `HidP_GetValueCaps` 确认字段，使用 `HidD_GetFeature` 或 `HidD_GetInputReport` 只读取得报告，再由 `HidP_GetUsageValue` 提取，支持有效的 0% 值。
+- 仅读取明确声明的 Report ID，单接口最多四种报告；不发送私有命令，不进行连续输入监听。部分设备不支持控制式 GET_REPORT，即使有字段也可能无法读取。
+- 多字段或同物理设备多个接口读数冲突时不猜测，不把失败缓存成满电。慢查询每接口最多一个、全局最多四个，后台返回后再采纳；桌面界面不等待无限请求。
+- 已验证结构布局、范围换算、字段筛选、冲突抑制、查询限流与错误恢复；本机当前没有连接可成功上报标准字段的其他设备，不宣称新增型号已实测。
+- [HIDP_VALUE_CAPS](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/hidpi/ns-hidpi-_hidp_value_caps)、[HidP_GetUsageValue](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/hidpi/nf-hidpi-hidp_getusagevalue)。
+
 ## HI98 Pro
 
 - 接收器：`VID_3554 / PID_FA09`，厂商集合 `FF02 / 0002`，输入/输出 20 字节。
