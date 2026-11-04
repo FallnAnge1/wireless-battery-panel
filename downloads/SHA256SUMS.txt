@@ -1,2 +1,2 @@
 0e72033b60a8b94bce01df801a8d087085b1aec85103f10d41512cce2d4e5e9e  WirelessBatteryPanel.exe
-ae7134d79d4391641322dfb8c0dbb1d15571d2619441c1be3185c075477c3379  wireless-battery-panel-v2.13.0-win-x64.zip
+203f12abc4bbe66d3a5cf62801c30984394ecc30f9d03dec9e377398d1882447  wireless-battery-panel-v2.13.0-win-x64.zip
