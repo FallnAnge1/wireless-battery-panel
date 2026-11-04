@@ -36,7 +36,9 @@ Windows 属性可能缓存，蓝牙属性未提供、断开、无效或冲突时
 
 ## 使用
 
-下载构建产物中的 `WirelessBatteryPanel.exe` 并双击。可改名后放到桌面；图标内嵌，无需附带 ICO 或源文件。
+[直接下载 EXE](https://github.com/FallnAnge1/wireless-battery-panel/raw/refs/heads/main/downloads/WirelessBatteryPanel.exe) · [下载 Windows x64 ZIP](https://github.com/FallnAnge1/wireless-battery-panel/raw/refs/heads/main/downloads/wireless-battery-panel-v2.12.0-win-x64.zip) · [SHA-256 校验值](downloads/SHA256SUMS.txt)
+
+双击 EXE 即可运行。可改名后放到桌面；图标内嵌，无需附带 ICO 或源文件。
 
 - 右上角小按钮：立即刷新全部设备。
 - 右上角关闭：收起到托盘；双击托盘重新打开。
